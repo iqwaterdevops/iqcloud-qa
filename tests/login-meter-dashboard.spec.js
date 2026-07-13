@@ -3,10 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const config = require('../config');
+const { buildSummaryMessage, sendMessage } = require('../services/notificationService');
 
 const LOGIN_URL = config.loginURL;
 const CREDENTIALS_FILE = path.join(__dirname, 'Login-credentials.csv');
 const OUTPUT_DIR = path.join(process.cwd(), 'test-results', 'navigation-audit');
+const RUN_LOG_FILE = path.join(OUTPUT_DIR, 'execution.log');
+const RUN_STATUS_FILE = path.join(OUTPUT_DIR, 'last-run-status.txt');
 
 function sanitizeForFileName(value) {
   return String(value || '')
@@ -32,6 +35,19 @@ function cleanOldArtifacts(dirPath) {
   if (fs.existsSync(dirPath)) {
     fs.rmSync(dirPath, { recursive: true, force: true });
   }
+}
+
+function appendRunLog(message) {
+  const timestamp = new Date().toISOString();
+  const line = `[${timestamp}] ${message}`;
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.appendFileSync(RUN_LOG_FILE, `${line}\n`, 'utf8');
+  console.log(line);
+}
+
+function writeRunStatus(status, detail) {
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(RUN_STATUS_FILE, `${status}\n${detail}\n`, 'utf8');
 }
 
 async function writeExcelReport(rows, excelPath, screenshotsDir) {
@@ -100,6 +116,26 @@ function formatLocalDateTime(date = new Date()) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+function buildFailureSummary(rows) {
+  const failedRows = rows.filter((row) => row.status !== 'PASS');
+  const categories = {};
+  const reasons = {};
+
+  failedRows.forEach((row) => {
+    categories[row.pageName] = (categories[row.pageName] || 0) + 1;
+    const reason = row.actual || row.validationDetails || 'Unknown failure';
+    reasons[reason] = (reasons[reason] || 0) + 1;
+  });
+
+  return {
+    total: rows.length,
+    passed: rows.length - failedRows.length,
+    failed: failedRows.length,
+    categories,
+    reasons,
+  };
 }
 
 function getExpectedMenusForPhase(account) {
@@ -817,21 +853,26 @@ async function logoutFromAccount(page) {
 
 test('validate English menu access and logout for all accounts', async ({ browser }) => {
   test.setTimeout(15 * 60 * 1000); // Extended timeout for English menu validation
-  
-  const projectName = sanitizeForFileName(test.info().project.name || 'default');
-  const projectOutputDir = path.join(OUTPUT_DIR, projectName);
-  const screenshotsDir = path.join(projectOutputDir, 'screenshots');
-  const csvFile = path.join(projectOutputDir, 'english-menu-test-results.csv');
-  const excelFile = path.join(projectOutputDir, 'english-menu-test-results.xlsx');
-  
-  cleanOldArtifacts(projectOutputDir);
-  fs.mkdirSync(screenshotsDir, { recursive: true });
-  
-  const testData = readTestData(CREDENTIALS_FILE);
-  expect(testData.length, 'No valid test data found in CSV.').toBeGreaterThan(0);
-  
-  const rows = [];
-  let caseCounter = 1;
+
+  appendRunLog('Starting English menu validation run');
+  writeRunStatus('RUNNING', 'English menu validation started');
+
+  try {
+    const projectName = sanitizeForFileName(test.info().project.name || 'default');
+    const projectOutputDir = path.join(OUTPUT_DIR, projectName);
+    const screenshotsDir = path.join(projectOutputDir, 'screenshots');
+    const csvFile = path.join(projectOutputDir, 'english-menu-test-results.csv');
+    const excelFile = path.join(projectOutputDir, 'english-menu-test-results.xlsx');
+    
+    cleanOldArtifacts(projectOutputDir);
+    fs.mkdirSync(screenshotsDir, { recursive: true });
+    
+    const testData = readTestData(CREDENTIALS_FILE);
+    appendRunLog(`Loaded ${testData.length} accounts from ${CREDENTIALS_FILE}`);
+    expect(testData.length, 'No valid test data found in CSV.').toBeGreaterThan(0);
+    
+    const rows = [];
+    let caseCounter = 1;
 
   async function recordRow(page, testPhase, fields) {
     rows.push(await buildResultRow(page, testPhase, fields));
@@ -1068,12 +1109,47 @@ await recordRow(page, 'EN', {
     ].map(csvEscape).join(','));
   }
   
-  fs.mkdirSync(projectOutputDir, { recursive: true });
-  fs.writeFileSync(csvFile, `${csvLines.join('\n')}\n`, 'utf8');
-  await writeExcelReport(rows, excelFile, screenshotsDir);
-  test.info().annotations.push({
-    type: 'sheet',
-    description: `English menu test results generated: ${excelFile}`,
-  });
+    fs.mkdirSync(projectOutputDir, { recursive: true });
+    fs.writeFileSync(csvFile, `${csvLines.join('\n')}\n`, 'utf8');
+    await writeExcelReport(rows, excelFile, screenshotsDir);
+
+    appendRunLog(`Generated CSV report: ${csvFile}`);
+    appendRunLog(`Generated Excel report: ${excelFile}`);
+
+    const summary = buildFailureSummary(rows);
+    const title = summary.failed > 0 ? 'IQCloud QA Test Summary - Failures detected' : 'IQCloud QA Test Summary - All checks passed';
+    const message = buildSummaryMessage({
+      title,
+      summary,
+      runName: 'English menu validation',
+    });
+
+    if (config.webhookUrl) {
+      try {
+        await sendMessage({
+          provider: 'webhook',
+          webhookUrl: config.webhookUrl,
+          title,
+          message,
+        });
+        appendRunLog('Webhook notification sent successfully');
+      } catch (notifyError) {
+        appendRunLog(`Webhook notification failed: ${notifyError.message}`);
+      }
+    } else {
+      appendRunLog('Webhook URL not configured; skipping notification');
+    }
+
+    writeRunStatus('SUCCESS', `Reports generated: ${csvFile} | ${excelFile}`);
+
+    test.info().annotations.push({
+      type: 'sheet',
+      description: `English menu test results generated: ${excelFile}`,
+    });
+  } catch (error) {
+    appendRunLog(`Run failed: ${error && error.message ? error.message : error}`);
+    writeRunStatus('FAILED', error && error.message ? error.message : 'English menu validation failed');
+    throw error;
+  }
 });
 

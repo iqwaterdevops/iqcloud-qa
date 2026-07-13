@@ -12,6 +12,9 @@ const config = {
   
   // Profile page URL (for language switching)
   profileURL: 'https://cloud.iqwater.de/mein-profil',
+
+  // Notification settings
+  webhookUrl: process.env.WEBHOOK_URL || 'https://play.svix.com/in/CGZmAEQ0vsS0DakqdgS2442Pms1/',
 };
 
 module.exports = config;
