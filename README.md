@@ -18,7 +18,7 @@ This installs `@playwright/test` (see `package.json`) and the Chromium browser b
 
 ### Running the tests
 
-Run the full suite (headless):
+Run the full suite - headless
 
 ```bash
 npm test
@@ -44,4 +44,3 @@ npm run test:ui
 - Navigate to the **Meter Dashboard** menu after login.
 
 Selectors for the login page are based on the visible English texts (`Enter Email or Mobile Number`, `Password`, `Sign In`) from the live site. If your app changes labels or you use German by default, you may need to tweak the locators in `tests/login-meter-dashboard.spec.js`.
-

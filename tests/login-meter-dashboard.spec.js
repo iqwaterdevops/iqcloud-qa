@@ -2,8 +2,9 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
+const config = require('../config');
 
-const LOGIN_URL = 'https://iqtrackitng-test.azurewebsites.net/anmeldung';
+const LOGIN_URL = config.loginURL;
 const CREDENTIALS_FILE = path.join(__dirname, 'Login-credentials.csv');
 const OUTPUT_DIR = path.join(process.cwd(), 'test-results', 'navigation-audit');
 
@@ -197,7 +198,7 @@ function readTestData(csvPath) {
 async function switchLanguage(page, targetLanguage) {
   try {
     console.log(`[LANGUAGE SWITCH] Attempting to switch language to ${targetLanguage}`);
-    await page.goto('https://iqtrackitng-test.azurewebsites.net/mein-profil', {
+    await page.goto(config.profileURL, {
       waitUntil: 'domcontentloaded',
       timeout: 10000,
     });

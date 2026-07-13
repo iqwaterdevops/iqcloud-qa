@@ -1,5 +1,6 @@
 // @ts-check
 const { defineConfig, devices } = require('@playwright/test');
+const config = require('./config');
 
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
 module.exports = defineConfig({
@@ -14,7 +15,7 @@ module.exports = defineConfig({
     ['html', { open: 'never' }],
   ],
   use: {
-    baseURL: 'https://iqtrackitng-test.azurewebsites.net',
+    baseURL: config.baseURL,
     headless: true,
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
